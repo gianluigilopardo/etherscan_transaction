@@ -1,6 +1,6 @@
 # Etherscan Token Transaction Fetcher
 
-This script fetches token transaction data from the Etherscan API and saves it to CSV files. It retrieves transactions for a specified token from the latest block until a specified end date.
+This script fetches token transaction data from the Etherscan API and saves it to a single CSV file. It retrieves transactions for a specified token from the latest block until a specified end date.
 
 ## Requirements
 
@@ -11,9 +11,8 @@ This script fetches token transaction data from the Etherscan API and saves it t
 
 Install the required libraries using pip:
 
-```
-bash
-pip install requirements.txt
+```bash
+pip install -r requirements.txt
 ```
 
 ## Setup
@@ -21,7 +20,7 @@ pip install requirements.txt
 1. **API Key**: Obtain an API key from [Etherscan APIs](https://etherscan.io/apis) by signing up for an account.
 2. **Environment Variable**: Store your Etherscan API key in a `.env` file in the same directory as the script:
 
-   ```
+   ```plaintext
    ETHERSCAN_KEY=your_etherscan_api_key_here
    ```
 
@@ -31,10 +30,14 @@ pip install requirements.txt
    - Set the `token_address` variable to the contract address of the token you want to fetch transactions for. Default is set to USDT ([Tether](https://tether.to/)).
    - Set the `end_date` variable to the date until which you want to fetch transactions. Format: `YYYY-MM-DD`.
 
-2. **Run the Script**: Execute the script using Python:
-
+2. **Run the Script**: 
+- Fetch and collect transaction data:
    ```bash
-   python main.py
+   python fetch.py 
+   ```
+- Merge into single CSV file: 
+   ```bash
+   python merge.py 
    ```
 
 3. **Output**: The script saves transaction data to CSV files in the `transactions` directory, named based on the block range.
