@@ -1,2 +1,35 @@
-.env
+# Core requested patterns
+*.json
 *.csv
+*.csvo
+
+# Python cache / build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+.env
+
+# Local tooling / IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Data/output directories
+transactions_usdt_eth_2025/
+
+# Logs
+*.log
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Misc
+*.tmp
+*.swp
