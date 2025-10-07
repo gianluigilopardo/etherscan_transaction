@@ -1,6 +1,6 @@
 import requests
 import polars as pl
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import os
 from pathlib import Path
@@ -82,6 +82,84 @@ def _fetch_batch(token_address: str, end_block: int):
     # Return None to signal a hard API problem (handled upstream)
     return None, data
 
+def _parse_range_from_filename(fname: str):
+    """Parse HIGH_LOW from a filename like '23524414_23524246.csv'."""
+    if not fname:
+        return None
+    base = os.path.basename(fname)
+    stem = base.split('.')[0]
+    parts = stem.split('_')
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        a, b = int(parts[0]), int(parts[1])
+        return max(a, b), min(a, b)
+    return None
+
+def _extract_range(entry):
+    """Return (high, low) tuple from a variety of possible index entry formats.
+
+    Supported:
+      - plain filename string "HIGH_LOW.csv"
+      - dict with keys: ('high','low') or ('max_block','min_block') etc.
+      - dict that only has 'file' / 'filename' (then parse)
+    """
+    # String form
+    if isinstance(entry, str):
+        return _parse_range_from_filename(entry)
+
+    # Dict form
+    if isinstance(entry, dict):
+        high = low = None
+        for h_key in ('high', 'max_block', 'max', 'hi'):
+            if h_key in entry:
+                try:
+                    high = int(entry[h_key])
+                    break
+                except Exception:
+                    pass
+        for l_key in ('low', 'min_block', 'min', 'lo'):
+            if l_key in entry:
+                try:
+                    low = int(entry[l_key])
+                    break
+                except Exception:
+                    pass
+        if high is not None and low is not None:
+            return high, low
+        # Try filename fields
+        fname = entry.get('file') or entry.get('filename')
+        rng = _parse_range_from_filename(fname) if fname else None
+        if rng:
+            return rng
+    return None
+
+def _iter_index_entries(index_obj):
+    """Yield raw entries from various index container shapes."""
+    if not index_obj:
+        return
+    if isinstance(index_obj, list):
+        for e in index_obj:
+            yield e
+    elif isinstance(index_obj, dict):
+        # Common pattern: {'files': [...]} or some dict of file->meta
+        if 'files' in index_obj and isinstance(index_obj['files'], list):
+            for e in index_obj['files']:
+                yield e
+        else:
+            # Fall back to values
+            for e in index_obj.values():
+                yield e
+
+def _covering_range(block: int, index_obj) -> tuple[int, int] | None:
+    """Return (high, low) of a range covering block, else None."""
+    for entry in _iter_index_entries(index_obj):
+        rng = _extract_range(entry)
+        if not rng:
+            continue
+        hi, lo = rng
+        if lo <= block <= hi:
+            return hi, lo
+    return None
+
 def fetch_and_save_transactions(token_address: str, start_date: str):
     """Backward fetch from latest block down to start_date (inclusive).
 
@@ -111,11 +189,20 @@ def fetch_and_save_transactions(token_address: str, start_date: str):
     current_block = newest_block
     empty_batches = 0
     written = 0
+    oldest_ts_seen = newest_ts  # track oldest timestamp reached in this run
 
     while True:
-        if is_block_in_index(current_block, index):
-            print(f'[INFO] Block {current_block} already covered. Stopping.')
-            break
+        covering = _covering_range(current_block, index)
+        if covering:
+            hi, lo = covering
+            next_block = lo - 1
+            if next_block < 0:
+                print('[INFO] Reached block < 0, stopping.')
+                break
+            print(f'[INFO] Block {current_block} lies in existing range {hi}->{lo}; skipping to {next_block}')
+            current_block = next_block
+            # Check if we still need more (timestamp boundary handled later)
+            continue
 
         df, meta = _fetch_batch(token_address, current_block)
         if df is None:  # hard error
@@ -152,9 +239,18 @@ def fetch_and_save_transactions(token_address: str, start_date: str):
         try:
             df.write_csv(out_path)
             index = update_index_with_file(index, filename)
+            # No need to recompute entire structure; skip as extraction is resilient.
             save_index(INDEX_PATH, index)
             written += 1
             print(f'[DEBUG] Wrote {filename} rows={df.height} blocks {current_block}->{lowest_block}')
+            # Progress every 10 chunks
+            oldest_ts_file = int(df['timeStamp'].min())
+            if oldest_ts_file < oldest_ts_seen:
+                oldest_ts_seen = oldest_ts_file
+            if written % 10 == 0:
+                progress_dt = datetime.fromtimestamp(oldest_ts_seen, tz=timezone.utc)
+                print(f'[PROGRESS] After {written} chunks oldest timestamp so far: '
+                      f'{progress_dt.isoformat()} (block {lowest_block})')
         except Exception as e:
             print(f'[ERROR] Could not write {filename}: {e}')
             break
